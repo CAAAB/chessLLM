@@ -3,6 +3,8 @@ import logging
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import ollama
+from ollama import Client, ResponseError # Specific import for ResponseError
+import httpx # For specific httpx error handling
 
 # Configure basic logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -12,8 +14,10 @@ app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
 
 # Configure Ollama API Host and Model from environment variables
-OLLAMA_API_HOST = os.getenv('OLLAMA_API_HOST', "http://localhost:11434")
-OLLAMA_MODEL = os.getenv('OLLAMA_MODEL', 'llama2')
+# These will be effectively re-read inside explain_moves if they change, 
+# but good for initial log message at startup.
+OLLAMA_API_HOST_GLOBAL = os.getenv('OLLAMA_API_HOST', "http://localhost:11434")
+OLLAMA_MODEL_GLOBAL = os.getenv('OLLAMA_MODEL', 'llama2')
 
 @app.route('/explain_moves', methods=['POST'])
 def explain_moves():
@@ -38,72 +42,66 @@ def explain_moves():
             logging.warning(f"Invalid move_sequence type or content: {move_sequence}")
             return jsonify({'error': 'move_sequence must be a list of strings'}), 400
 
-        moves_str = " ".join(move_sequence)
-        logging.debug(f"FEN: {fen}, Moves: {moves_str}")
+        move_sequence_str = " ".join(move_sequence)
+        logging.debug(f"FEN: {fen}, Moves: {move_sequence_str}")
 
-        # Initialize Ollama client
-        try:
-            client = ollama.Client(host=OLLAMA_API_HOST)
-        except Exception as e:
-            logging.error(f"Error initializing Ollama client with host {OLLAMA_API_HOST}: {e}", exc_info=True)
-            return jsonify({'error': f'Failed to connect to Ollama: {str(e)}'}), 500
+        model_name = os.getenv('OLLAMA_MODEL', 'llama2')
+        host = os.getenv('OLLAMA_API_HOST', 'http://localhost:11434')
+        
+        system_prompt_text = "You are a helpful chess assistant. Your task is to explain the strategic idea, tactical motifs, and potential consequences behind a given sequence of chess moves from a specific board position."
 
-        prompt_text = f"""
-You are a chess assistant.
-Given the chess position represented by the FEN string:
+        user_prompt_text = f"""Given the chess position represented by the FEN string:
 {fen}
 
-Explain the strategic idea, tactical motifs, and potential consequences behind the following sequence of moves:
-{moves_str}
+Explain the following sequence of moves:
+{move_sequence_str}
 
 Provide a concise explanation focusing on the plan for the side making these moves.
 """
-        logging.debug(f"Constructed prompt: {prompt_text}")
-
+        logging.debug(f"System Prompt: {system_prompt_text}")
+        logging.debug(f"User Prompt: {user_prompt_text}")
+        
         try:
-            logging.info(f"Sending request to Ollama model: {OLLAMA_MODEL} at host: {OLLAMA_API_HOST}")
+            # Initialize client here to use potentially updated host from environment
+            client = Client(host=host) 
+            
+            logging.info(f"Sending request to Ollama model: {model_name} at host: {host} with think=False")
             response = client.chat(
-                model=OLLAMA_MODEL,
-                messages=[{'role': 'user', 'content': prompt_text}]
+                model=model_name,
+                messages=[
+                    {'role': 'system', 'content': system_prompt_text},
+                    {'role': 'user', 'content': user_prompt_text}
+                ],
+                think=False # Pass think=False as a direct keyword argument as per user's example
             )
-            logging.debug(f"Ollama response: {response}")
-            explanation = response['message']['content']
-        except Exception as e:
-            logging.error(f"Ollama API call failed: {e}", exc_info=True)
-            # Attempt to see if the model exists if a model not found error is suspected
-            try:
-                client.list() # check connection
-            except Exception as client_e:
-                 logging.error(f"Ollama client list/connection error: {client_e}", exc_info=True)
-                 return jsonify({'error': f'Ollama client error: {str(client_e)}. Is OLLAMA_API_HOST ({OLLAMA_API_HOST}) correct and Ollama running?'}), 500
+            logging.debug(f"Ollama raw response object: {response}")
             
-            available_models = []
-            try:
-                models_info = client.list()
-                if models_info and 'models' in models_info:
-                    available_models = [m['name'] for m in models_info['models']]
-            except Exception as list_exc:
-                logging.error(f"Failed to retrieve list of available Ollama models: {list_exc}", exc_info=True)
-                # Return a generic error as we can't confirm model availability
-                return jsonify({'error': f'Error communicating with Ollama model and failed to list models: {str(e)}'}), 500
+            if response and isinstance(response, dict) and 'message' in response and isinstance(response['message'], dict) and 'content' in response['message']:
+                explanation = response['message']['content']
+                logging.debug(f"Extracted explanation: {explanation}")
+                logging.debug("Successfully processed /explain_moves, returning explanation.")
+                return jsonify({'explanation': explanation})
+            else:
+                logging.error(f"Unexpected Ollama response structure: {response}")
+                return jsonify({'error': 'Unexpected response structure from LLM after successful call'}), 500
 
-            # Check if the model (with and without :latest) is in the list
-            model_with_latest = f"{OLLAMA_MODEL}:latest"
-            if not (OLLAMA_MODEL in available_models or model_with_latest in available_models):
-                 logging.warning(f'Ollama model "{OLLAMA_MODEL}" not found. Available models: {", ".join(available_models)}')
-                 return jsonify({'error': f'Ollama model "{OLLAMA_MODEL}" not found. Available models: {", ".join(available_models)}. Or connection issue.'}), 500
-            
-            # If model seems available, the error was likely something else during chat
-            return jsonify({'error': f'Error communicating with Ollama model: {str(e)}'}), 500
-
-        logging.debug("Successfully processed /explain_moves, returning explanation.")
-        return jsonify({'explanation': explanation})
+        except ResponseError as e:
+            logging.error(f"Ollama API ResponseError: Status Code: {e.status_code}, Error: {e.error}", exc_info=True)
+            return jsonify({'error': f"LLM service ResponseError: {e.status_code} - {str(e.error)}"}), 500
+        except httpx.HTTPStatusError as e_httpx_status: 
+            logging.error(f"Ollama chat API returned an HTTPStatusError: {e_httpx_status.response.status_code} - {e_httpx_status.response.text}", exc_info=True)
+            return jsonify({'error': f"LLM service HTTPStatusError: ({e_httpx_status.response.status_code})."}), 500
+        except httpx.RequestError as e_httpx_req: 
+            logging.error(f"Could not connect to Ollama service (httpx.RequestError): {e_httpx_req}", exc_info=True)
+            return jsonify({'error': "Could not connect to the LLM service (RequestError)."}), 500
+        except Exception as e_general: # Catch any other exceptions, including potential client init issues if host is bad
+            logging.error(f"An unexpected error occurred while querying Ollama: {e_general}", exc_info=True)
+            return jsonify({'error': f"An unexpected error occurred: {str(e_general)}"}), 500
 
     except Exception as e:
-        # Catch-all for any other unexpected errors
-        logging.error(f"Unexpected error in /explain_moves: {e}", exc_info=True)
+        logging.error(f"Unexpected error in /explain_moves (outer try-except): {e}", exc_info=True)
         return jsonify({'error': f'An unexpected error occurred: {str(e)}'}), 500
 
 if __name__ == '__main__':
-    logging.info(f"Starting Flask server on port 5000, OLLAMA_HOST: {OLLAMA_API_HOST}, OLLAMA_MODEL: {OLLAMA_MODEL}")
+    logging.info(f"Starting Flask server on port 5000, OLLAMA_HOST: {OLLAMA_API_HOST_GLOBAL}, OLLAMA_MODEL: {OLLAMA_MODEL_GLOBAL}")
     app.run(host='0.0.0.0', port=5000, debug=True)
