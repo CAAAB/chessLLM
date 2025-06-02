@@ -1,0 +1,130 @@
+.env
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+node_modules/
+.DS_Store
+# Example for IDE specific files (e.g., VSCode)
+.vscode/
+# Example for OS specific files (e.g., macOS)
+.AppleDouble
+.LSOverride
+# Thumbnails
+Thumbs.db
+# Files that might store sensitive information or large data
+*.log
+*.sqlite
+*.db
+*.csv
+# Backup files
+*.bak
+*.swp
+# Build outputs
+build/
+dist/
+*.egg-info/
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+# Python virtual environment
+venv/
+env/
+.venv/
+.env/
+# Coverage reports
+.coverage
+coverage.xml
+htmlcov/
+# MyPy cache
+.mypy_cache/
+# pytest cache
+.pytest_cache/
+# Ruff cache
+.ruff_cache/
+# profiling/tracing files
+*.prof
+*.trace
+# editor backup files
+*~
+*.orig
+*.rej
+# Temp files
+*.tmp
+*.temp
+# dotenv
+.env*
+!.env.example
+# Compiled files from other languages (if any might appear)
+*.o
+*.so
+*.dll
+*.exe
+# Specific to this project if any large data files are generated
+# data/
+# output/
+# LLM_EXPLANATION_DOCS.md # This seems like a generated doc, might want to ignore if it's always auto-generated
+# However, for now, I will only add .env as per the primary goal.
+# Re-evaluating: The request was to add `.env` and if new, "just add `.env`" for simplicity,
+# OR "good practice to ensure other common Python ignores are present".
+# Since it's new, I will add a more comprehensive Python .gitignore.
+# Previous thought was too narrow.
+# Final decision: Add a comprehensive Python .gitignore and ensure .env is in it.
+# The provided output from `ls()` did not show `.gitignore`, so I'm creating it.
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE specific files
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sublime-project
+*.sublime-workspace
+
+# OS specific files
+.DS_Store
+Thumbs.db
+
+# Other common ignores
+node_modules/
+*.log
+*.tmp
+*.bak
+*.swp
+
+# Ensure .env is explicitly ignored, but .env.example is not
+.env*
+!.env.example

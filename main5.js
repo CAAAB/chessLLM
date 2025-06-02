@@ -292,16 +292,22 @@ function parseInfoLine(line) {
         if (pv.length > 0) analysisManager.lastBestMove = pv[0];
     } else if (analysisManager.currentAnalysisType === 'best_moves' && parsed_score_obj_white_pov && pv.length > 0 && multipvRank !== null) {
         if (currentBestMovesResult && currentBestMovesResult.fen === analysisManager.lastBestMovesFen) {
+            console.log('[DEBUG] parseInfoLine - Best Moves Info:', {
+                currentRequestFen: analysisManager.lastBestMovesFen,
+                multipvRank: multipvRank,
+                pv: pv, 
+                score: parsed_score_obj_white_pov
+            });
             const moveUci = pv[0];
             const moveSan = uciToSan(moveUci, analysisManager.lastBestMovesFen);
             const scoreStr = formatScore(parsed_score_obj_white_pov, new Chess(analysisManager.lastBestMovesFen).turn());
             let existingMove = currentBestMovesResult.moves.find(m => m.rank === multipvRank);
             // Ensure 'pv' is the array of moves from the 'info' line.
             // If pv is not available or empty, set pv_sequence to an empty array.
-            const pv_sequence = (Array.isArray(pv) && pv.length > 0) ? pv : []; 
-            const moveData = { 
-                move: moveUci, 
-                san: moveSan, 
+            const pv_sequence = (Array.isArray(pv) && pv.length > 0) ? pv : [];
+            const moveData = {
+                move: moveUci,
+                san: moveSan,
                 score_str: scoreStr, 
                 score_obj: parsed_score_obj_white_pov, 
                 depth: depth,
@@ -2097,6 +2103,11 @@ async function handleExplainPlanClick() {
 
     statusMessage("Asking AI for explanation of the plan...");
     engineStatusMessage(""); // Clear engine status
+
+    console.log('[DEBUG] handleExplainPlanClick - Sending to backend:', {
+        fen: fen,
+        move_sequence: move_sequence
+    });
 
     try {
         const response = await fetch('http://localhost:5000/explain_moves', { // Assuming Flask runs on port 5000

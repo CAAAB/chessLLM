@@ -1,4 +1,5 @@
 import os
+from dotenv import load_dotenv
 import logging
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -7,6 +8,9 @@ from ollama import Client, ResponseError # Specific import for ResponseError
 import httpx # For specific httpx error handling
 import chess # For UCI to SAN conversion
 
+# Load environment variables from .env file
+load_dotenv()
+
 # Configure basic logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -14,11 +18,8 @@ logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
 
-# Configure Ollama API Host and Model from environment variables
-# These will be effectively re-read inside explain_moves if they change, 
-# but good for initial log message at startup.
-OLLAMA_API_HOST_GLOBAL = os.getenv('OLLAMA_API_HOST', "http://localhost:11434")
-OLLAMA_MODEL_GLOBAL = os.getenv('OLLAMA_MODEL', 'llama2')
+# Note: Global variables OLLAMA_API_HOST_GLOBAL and OLLAMA_MODEL_GLOBAL are removed
+# as os.getenv will be called directly where needed, respecting .env loading.
 
 @app.route('/explain_moves', methods=['POST'])
 def explain_moves():
@@ -132,5 +133,8 @@ Provide a concise explanation focusing on the plan for the side making these mov
         return jsonify({'error': f'An unexpected error occurred: {str(e)}'}), 500
 
 if __name__ == '__main__':
-    logging.info(f"Starting Flask server on port 5000, OLLAMA_HOST: {OLLAMA_API_HOST_GLOBAL}, OLLAMA_MODEL: {OLLAMA_MODEL_GLOBAL}")
+    # Fetch current values from env for the startup log, defaults are fallbacks
+    ollama_host_startup = os.getenv('OLLAMA_API_HOST', 'http://localhost:11434')
+    ollama_model_startup = os.getenv('OLLAMA_MODEL', 'llama2')
+    logging.info(f"Starting Flask server on port 5000, OLLAMA_HOST: {ollama_host_startup}, OLLAMA_MODEL: {ollama_model_startup}")
     app.run(host='0.0.0.0', port=5000, debug=True)
