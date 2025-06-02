@@ -12,6 +12,7 @@ const promotionPopup = document.getElementById('promotion-popup');
 const blackNameInput = document.getElementById('black-name');
 const whiteNameInput = document.getElementById('white-name');
 const showBestMoveBtn = document.getElementById('show-best-move-btn');
+const explainPlanBtn = document.getElementById('explain-plan-btn');
 const toggleHelpersBtn = document.getElementById('toggle-helpers-btn');
 const saveGameBtn = document.getElementById('save-game-btn');
 const boardNumDisplay = document.getElementById('board-number-display');
@@ -295,9 +296,22 @@ function parseInfoLine(line) {
             const moveSan = uciToSan(moveUci, analysisManager.lastBestMovesFen);
             const scoreStr = formatScore(parsed_score_obj_white_pov, new Chess(analysisManager.lastBestMovesFen).turn());
             let existingMove = currentBestMovesResult.moves.find(m => m.rank === multipvRank);
-            const moveData = { move: moveUci, san: moveSan, score_str: scoreStr, score_obj: parsed_score_obj_white_pov, depth: depth };
-            if (existingMove) { Object.assign(existingMove, moveData); }
-            else { currentBestMovesResult.moves.push({ rank: multipvRank, ...moveData }); }
+            // Ensure 'pv' is the array of moves from the 'info' line.
+            // If pv is not available or empty, set pv_sequence to an empty array.
+            const pv_sequence = (Array.isArray(pv) && pv.length > 0) ? pv : []; 
+            const moveData = { 
+                move: moveUci, 
+                san: moveSan, 
+                score_str: scoreStr, 
+                score_obj: parsed_score_obj_white_pov, 
+                depth: depth,
+                pv_sequence: pv_sequence // Store the full PV
+            };
+            if (existingMove) { 
+                Object.assign(existingMove, moveData); 
+            } else { 
+                currentBestMovesResult.moves.push({ rank: multipvRank, ...moveData }); 
+            }
             currentBestMovesResult.moves.sort((a, b) => a.rank - b.rank);
         }
     } else if (analysisManager.currentAnalysisType === 'selected_piece_moves' && parsed_score_obj_white_pov && pv.length > 0 && multipvRank !== null) {
@@ -1981,6 +1995,7 @@ function setupEventListeners() {
     showBestMoveBtn.addEventListener('click', handleShowBestMoveClick);
     toggleHelpersBtn.addEventListener('click', handleToggleHelpersClick);
     saveGameBtn.addEventListener('click', saveGameHistory);
+    explainPlanBtn.addEventListener('click', handleExplainPlanClick);
     document.addEventListener('keydown', handleKeyDown);
     setupTreeDrag(); window.addEventListener('resize', handleResize);
 }
@@ -2064,3 +2079,55 @@ function handleKeyDown(event) {
     }
 }
 function handleResize() { initBoard(); treeLayout.needsRedraw = true; if(currentEvalPlot){currentEvalPlot.resize();updatePlot();} requestRedraw(); }
+
+async function handleExplainPlanClick() {
+    if (!currentBestMovesResult || currentBestMovesResult.fen !== currentNode.fen || currentBestMoveIndex === -1) {
+        statusMessage("Please select a best move first using 'Show Best' to get a plan explanation.");
+        return;
+    }
+
+    const selectedMoveData = currentBestMovesResult.moves[currentBestMoveIndex];
+    if (!selectedMoveData || !selectedMoveData.pv_sequence || selectedMoveData.pv_sequence.length === 0) {
+        statusMessage("No move sequence (plan) available for the selected move.");
+        return;
+    }
+
+    const fen = currentBestMovesResult.fen;
+    const move_sequence = selectedMoveData.pv_sequence; // This was added in the previous step
+
+    statusMessage("Asking AI for explanation of the plan...");
+    engineStatusMessage(""); // Clear engine status
+
+    try {
+        const response = await fetch('http://localhost:5000/explain_moves', { // Assuming Flask runs on port 5000
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ fen: fen, move_sequence: move_sequence }),
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({ detail: "Unknown error from server" }));
+            let errorMsg = `Error from explanation server: ${response.status}`;
+            if (errorData && errorData.detail) {
+                errorMsg += ` - ${errorData.detail}`;
+            } else if (response.statusText) {
+                 errorMsg += ` - ${response.statusText}`;
+            }
+            throw new Error(errorMsg);
+        }
+
+        const data = await response.json();
+        if (data.explanation) {
+            // For now, display in statusMessage. A modal or dedicated panel could be a future improvement.
+            statusMessage(`AI Explanation: ${data.explanation}`);
+        } else {
+            statusMessage("Received an empty explanation from AI.");
+        }
+
+    } catch (error) {
+        console.error('Error fetching explanation:', error);
+        statusMessage(`Failed to get explanation: ${error.message}`);
+    }
+}
