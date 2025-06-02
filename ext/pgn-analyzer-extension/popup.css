@@ -1,0 +1,106 @@
+body {
+    font-family: sans-serif;
+    width: 380px; /* Adjust width as needed */
+    padding: 10px;
+    background-color: #f4f4f4;
+}
+
+#container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+h1 {
+    font-size: 1.2em;
+    margin-bottom: 10px;
+    color: #333;
+}
+
+#pgnInputArea {
+    width: 100%;
+    margin-bottom: 15px;
+}
+
+#pgnInput {
+    width: calc(100% - 12px); /* Account for padding/border */
+    margin-bottom: 5px;
+    padding: 5px;
+    border: 1px solid #ccc;
+    border-radius: 3px;
+}
+
+#loadPgnBtn {
+    padding: 8px 15px;
+    background-color: #007bff;
+    color: white;
+    border: none;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+#loadPgnBtn:hover {
+    background-color: #0056b3;
+}
+
+#analysisArea {
+     width: 100%;
+     display: flex;
+     flex-direction: column;
+     align-items: center;
+}
+
+#navigation {
+    margin-bottom: 10px;
+}
+
+#navigation button {
+    padding: 5px 10px;
+    margin: 0 3px;
+    cursor: pointer;
+}
+
+#moveCounter {
+    display: inline-block;
+    margin: 0 10px;
+    font-size: 0.9em;
+    color: #555;
+}
+
+
+#info {
+    font-size: 0.9em;
+    background-color: #eee;
+    padding: 8px;
+    border-radius: 4px;
+    margin-bottom: 10px;
+    width: calc(100% - 16px); /* Account for padding */
+    box-shadow: inset 0 0 3px rgba(0,0,0,0.1);
+}
+
+#info p {
+    margin: 4px 0;
+    line-height: 1.4;
+}
+
+#info span {
+    font-weight: bold;
+    color: #333;
+}
+
+#chartContainer {
+    width: 100%;
+    max-width: 350px; /* Ensure chart fits */
+    height: 150px; /* Adjust height */
+    margin-top: 10px;
+    background: white;
+    padding: 5px;
+    border-radius: 3px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+
+#errorArea {
+    font-size: 0.9em;
+    font-weight: bold;
+}

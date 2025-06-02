@@ -1,0 +1,388 @@
+/* Basic Reset & Font */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+    font-family: sans-serif;
+    background-color: #3c3c3c; /* Dark Grey */
+    color: #f0f0f0;
+    display: flex;
+    justify-content: center;
+    align-items: flex-start; /* Align top */
+    padding: 20px;
+    min-height: 100vh;
+}
+
+.container {
+    display: flex;
+    flex-direction: column;
+    max-width: 700px; /* Adjust as needed */
+    width: 100%;
+}
+
+.move-evaluation {
+    position: absolute;
+    top: 0;
+    left: 0;
+    pointer-events: none;
+    transition: background-color 0.3s ease;
+}
+
+.legal-move-loading {
+    position: absolute;
+    top: 0;
+    left: 0;
+    pointer-events: none;
+    border-radius: 50%;
+    width: 100%;
+    height: 100%;
+    opacity: 0.7;
+    animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+    0% { opacity: 0.5; }
+    50% { opacity: 0.8; }
+    100% { opacity: 0.5; }
+}
+
+
+/* Setup Panel */
+#setup-panel {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background-color: #505064; /* Button Colorish */
+    padding: 5px 10px;
+    border-radius: 3px;
+    margin-bottom: 10px;
+    min-height: 40px;
+}
+.player-input-group label { margin-right: 5px; }
+.player-input-group input {
+    padding: 4px 6px;
+    border: 1px solid #808080;
+    border-radius: 3px;
+    background-color: #f0f0f0;
+    color: #000;
+}
+.player-input-group input:focus { border-color: #ffa500; outline: none; }
+.player-input-bottom { margin-top: 10px; } /* Position white input */
+
+#setup-panel button {
+    padding: 6px 12px;
+    background-color: #505064; /* Button Color */
+    color: white;
+    border: 1px solid #808080;
+    border-radius: 3px;
+    cursor: pointer;
+    margin-left: 10px;
+    font-size: 12px;
+}
+#setup-panel button:hover { background-color: #6a6a82; }
+#setup-panel button.active { background-color: #ffa500; } /* Orange for active toggle */
+#board-number-display { margin-left: 15px; font-size: 12px; color: #d0d0d0; }
+
+/* Main Content (Board + Eval Bar) */
+#main-content {
+    display: flex;
+    width: 100%;
+}
+
+#board-area {
+    position: relative; /* For absolute positioning of pieces/highlights/popup */
+    width: calc(100% - 35px); /* Account for side panel width */
+    aspect-ratio: 1 / 1; /* Make it square */
+    max-width: 500px; /* Limit max size */
+    max-height: 500px;
+    margin: 0 auto; /* Center if container is wider */
+    display: flex; /* To contain coordinates and board */
+}
+
+#coordinate-container {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    pointer-events: none; /* Allow clicks to pass through */
+    font-size: 10px; /* Smaller coordinates */
+    color: rgba(180, 180, 180, 0.9);
+}
+.rank-coord, .file-coord {
+    position: absolute;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+/* JS will set specific positions for coordinates */
+
+
+#board-container {
+    display: grid;
+    grid-template-columns: repeat(8, 1fr);
+    grid-template-rows: repeat(8, 1fr);
+    width: 100%;
+    height: 100%;
+    border: 1px solid #333; /* Board border */
+}
+
+.square {
+    width: 100%;
+    height: 100%;
+    position: relative; /* For highlight overlays */
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+.square.light { background-color: #eedcbe; } /* Light brown */
+.square.dark { background-color: #b99473; } /* Dark brown */
+
+.square .piece {
+    width: 90%;
+    height: 90%;
+    background-size: contain;
+    background-repeat: no-repeat;
+    background-position: center;
+    cursor: grab;
+    position: absolute; /* Allow dragging */
+    z-index: 10;
+}
+.square .piece.dragging {
+    cursor: grabbing;
+    opacity: 0.7;
+    z-index: 1000; /* Ensure dragged piece is on top */
+    pointer-events: none; /* Don't interfere with drop target detection */
+}
+
+/* Highlight Overlays */
+.highlight-overlay {
+    position: absolute;
+    top: 0; left: 0; width: 100%; height: 100%;
+    pointer-events: none; /* Allow clicks through */
+    z-index: 5;
+}
+.highlight-selected { background-color: rgba(255, 255, 0, 0.6); } /* Yellowish */
+.highlight-last-move { background-color: rgba(186, 202, 68, 0.7); } /* Yellowish-Green */
+.highlight-engine-move { background-color: rgba(0, 150, 255, 0.6); } /* Blueish */
+
+/* Legal Move Markers */
+.legal-move-marker {
+    position: absolute;
+    top: 0; left: 0; width: 100%; height: 100%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    pointer-events: none;
+    z-index: 6;
+}
+.legal-move-dot {
+    width: 25%; /* Adjust size */
+    height: 25%;
+    background-color: rgba(0, 0, 0, 0.3); /* Dark transparent */
+    border-radius: 50%;
+}
+.legal-move-ring {
+    width: 90%; /* Adjust size */
+    height: 90%;
+    border: 5px solid rgba(0, 0, 0, 0.3); /* Dark transparent */
+    border-radius: 50%;
+}
+
+/* Badges */
+.board-badge {
+    position: absolute;
+    top: 2px; /* Changed from bottom to top */
+    right: 2px;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    border: 1px solid #0000;
+    z-index: 7;
+    pointer-events: none;
+}
+
+.board-badge img {
+    width: 16px; height: 16px;
+    filter: brightness(0) invert(1); /* Make badge icons white */
+}
+/* Badge Colors (JS will add these classes) */
+.badge-Best { background-color: #00b400; }
+.badge-Excellent { background-color: #32cd32; }
+.badge-Good { background-color: #006400; }
+.badge-Inaccuracy { background-color: #f0e68c; }
+.badge-Mistake { background-color: #ffa500; }
+.badge-Blunder { background-color: #c80000; }
+
+/* Side Panel & Eval Bar */
+#side-panel {
+    width: 35px; /* Eval bar width + padding */
+    height: 100%; /* Match board height */
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding-left: 10px;
+}
+#eval-bar {
+    width: 20px;
+    height: 100%; /* Should match board height via parent */
+    background-color: #000; /* Fallback/border */
+    display: flex;
+    flex-direction: column;
+    border: 1px solid #808080;
+    position: relative; /* Ensure it aligns correctly if board aspect-ratio changes things */
+}
+#eval-bar-white {
+    background-color: #fff;
+    width: 100%;
+    transition: height 0.2s ease-in-out; /* Animate */
+}
+#eval-bar-black {
+    background-color: #000;
+    width: 100%;
+     transition: height 0.2s ease-in-out; /* Animate */
+}
+
+/* Plot Panel */
+#plot-panel {
+    width: 100%;
+    height: 100px; /* Fixed height */
+    background-color: #282828; /* Darker grey */
+    margin-top: 15px;
+    border: 1px solid #808080;
+    padding: 5px;
+}
+#eval-plot {
+    display: block;
+    width: 100%;
+    height: 100%;
+}
+
+/* Tree Panel */
+#tree-panel-container {
+    width: 100%;
+    height: 250px; /* Fixed height */
+    background-color: #3c3c3c; /* Dark Grey */
+    border: 1px solid #808080;
+    margin-top: 15px;
+    overflow: auto; /* Enable scrolling */
+    position: relative; /* For potential absolute positioned elements like scrollbars */
+}
+#tree-panel {
+     /* The SVG will be large, container provides the viewport */
+     min-width: 100%; /* Ensure it fills container initially */
+     min-height: 100%;
+}
+#game-tree-svg {
+    display: block; /* Prevent extra space below SVG */
+    /* JS will set width/height based on content */
+    cursor: grab;
+}
+#game-tree-svg.grabbing { cursor: grabbing; }
+
+/* Tree SVG Elements (Example Styling) */
+.tree-node circle { /* Simple node */
+    fill: #808080;
+    stroke: #b0b0b0;
+    stroke-width: 1px;
+}
+.tree-node.root circle { fill: #646496; } /* Root color */
+.tree-node.current > *:not(text):not(g) { /* Outline current node (apply to shape/image) */
+    stroke: #fff !important;
+    stroke-width: 2px !important;
+}
+.tree-node image { /* Piece image */
+    pointer-events: none; /* Don't block clicks on underlying node */
+}
+.tree-node text { /* Move text */
+    fill: #d0d0d0;
+    font-size: 11px;
+    dominant-baseline: middle;
+    text-anchor: start;
+    pointer-events: none;
+}
+.tree-line {
+    stroke: #969696;
+    stroke-width: 1px;
+}
+.tree-badge { /* Small circle for quality */
+    stroke: #3c3c3c;
+    stroke-width: 1px;
+    pointer-events: none;
+}
+/* Tree badge colors handled by fill attribute set in JS */
+
+
+/* Status Bar */
+#status-bar {
+    margin-top: 15px;
+    padding: 5px 10px;
+    background-color: #282828;
+    border-radius: 3px;
+    font-size: 12px;
+    min-height: 25px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    color: #e0e0e0;
+}
+#engine-status-message { color: #ffa500; /* Orange for engine errors */ }
+
+/* Promotion Popup */
+#promotion-popup {
+    position: absolute;
+    background-color: rgba(90, 90, 90, 0.9);
+    border: 1px solid #969696;
+    z-index: 1001; /* Above dragged piece */
+    display: flex;
+    flex-direction: column;
+    padding: 5px;
+    border-radius: 3px;
+}
+#promotion-popup .promo-choice {
+    width: 50px; /* Adjust size as needed */
+    height: 50px;
+    background-size: contain;
+    background-repeat: no-repeat;
+    background-position: center;
+    cursor: pointer;
+    margin: 2px;
+    border-radius: 2px;
+}
+#promotion-popup .promo-choice:hover {
+    background-color: rgba(130, 130, 150, 0.8);
+}
+
+
+/* Utility */
+.hidden { display: none !important; }
+
+/* In your style.css or equivalent */
+.selected-piece-move-eval-overlay {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    top: 0;
+    left: 0;
+    z-index: 1; /* Below legal move markers and selection highlight */
+    pointer-events: none; /* Allow clicks to pass through to the square */
+    box-sizing: border-box; /* If adding padding/border */
+}
+
+.highlight-overlay.highlight-selected {
+    /* Ensure z-index is higher than eval overlay */
+    z-index: 2;
+    /* background-color: rgba(20, 80, 180, 0.4); */ /* Example color if not already defined elsewhere */
+}
+
+.legal-move-marker {
+    position: absolute;
+    top: 0; left: 0; width: 100%; height: 100%;
+    display: flex; justify-content: center; align-items: center;
+    pointer-events: none;
+    z-index: 3; /* Higher than selection highlight and eval overlay */
+}
+
+.piece {
+    /* Ensure pieces are on top of board markings */
+    z-index: 5; 
+    /* Other styles like width, height, background-size are already there */
+}

@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "PGN Analyzer with Stockfish",
+  "version": "1.0",
+  "description": "Analyzes a PGN using Stockfish, displays the game, evaluation, and evaluation history.",
+  "permissions": [],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "128": "icons/icon128.png"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["libs/stockfish.js", "libs/stockfish.wasm"],
+      "matches": ["<all_urls>"] // Required for worker loading in Manifest V3 potentially, adjust if needed
+    }
+  ]
+}

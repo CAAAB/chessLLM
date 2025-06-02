@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>PGN Analyzer</title>
+    <link rel="stylesheet" href="libs/chessboard-1.0.0.min.css">
+    <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+    <div id="container">
+        <h1>PGN Analyzer</h1>
+
+        <div id="pgnInputArea">
+            <textarea id="pgnInput" rows="5" placeholder="Paste PGN here..."></textarea>
+            <button id="loadPgnBtn">Load PGN</button>
+        </div>
+
+        <div id="analysisArea" style="display: none;">
+            <div id="board" style="width: 300px; margin-bottom: 10px;"></div>
+            <div id="navigation">
+                <button id="startBtn">|<</button>
+                <button id="prevBtn"><</button>
+                <span id="moveCounter">Move: 0 / 0</span>
+                <button id="nextBtn">></button>
+                <button id="endBtn">>|</button>
+            </div>
+
+            <div id="info">
+                <p><strong>Status:</strong> <span id="status">Idle</span></p>
+                <p><strong>Evaluation:</strong> <span id="evaluation">N/A</span></p>
+                <p><strong>Best Move:</strong> <span id="bestMove">N/A</span></p>
+                 <p><strong>Depth:</strong> <span id="depth">N/A</span></p>
+            </div>
+
+            <div id="chartContainer">
+                <canvas id="evalChart"></canvas>
+            </div>
+        </div>
+         <div id="errorArea" style="color: red; margin-top: 10px;"></div>
+    </div>
+
+    <!-- Libraries -->
+    <script src="libs/jquery-3.7.1.min.js"></script>
+    <script src="libs/chess.min.js"></script> <!-- Ensure correct filename -->
+    <script src="libs/chessboard-1.0.0.min.js"></script>
+    <script src="libs/chart.umd.js"></script> <!-- Ensure correct filename -->
+    <!-- stockfish.js is loaded as a worker in popup.js -->
+
+    <!-- Our Script -->
+    <script src="popup.js"></script>
+</body>
+</html>

@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chess960 Analysis</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <div id="setup-panel">
+            <div class="player-input-group">
+                <label for="black-name">Black:</label>
+                <input type="text" id="black-name" placeholder="Black Player">
+            </div>
+             <div class="setup-buttons">
+                <button id="show-best-move-btn">Show Best</button>
+                <button id="toggle-helpers-btn">Helpers: ON</button>
+                <button id="save-game-btn">Save Game</button>
+                <span id="board-number-display">Pos: 0</span>
+            </div>
+        </div>
+
+        <div id="main-content">
+            <div id="board-area">
+                 <div id="coordinate-container">
+                    <!-- Coordinates added by JS -->
+                 </div>
+                <div id="board-container">
+                    <!-- Squares and pieces added by JS -->
+                </div>
+                 <div id="promotion-popup" class="hidden">
+                    <!-- Promotion pieces added by JS -->
+                </div>
+            </div>
+            <div id="side-panel">
+                <div id="eval-bar">
+                    <div id="eval-bar-white"></div>
+                    <div id="eval-bar-black"></div>
+                </div>
+            </div>
+        </div>
+         <div class="player-input-group player-input-bottom">
+             <label for="white-name">White:</label>
+             <input type="text" id="white-name" placeholder="White Player">
+         </div>
+
+        <div id="plot-panel">
+            <canvas id="eval-plot"></canvas>
+        </div>
+
+        <div id="tree-panel-container">
+             <div id="tree-panel">
+                 <svg id="game-tree-svg"></svg>
+             </div>
+        </div>
+
+        <div id="status-bar">
+            <span id="status-message">Loading...</span>
+            <span id="engine-status-message"></span>
+        </div>
+    </div>
+
+    <!-- Libraries -->
+    <!--script src="js/chess.min.js"></script> -->
+    <script src="js/chess.min.js"></script>
+    <script src="js/stockfish.wasm.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="main5.js"></script>
+</body>
+</html>
