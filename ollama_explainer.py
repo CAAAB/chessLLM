@@ -5,6 +5,7 @@ from flask_cors import CORS
 import ollama
 from ollama import Client, ResponseError # Specific import for ResponseError
 import httpx # For specific httpx error handling
+import chess # For UCI to SAN conversion
 
 # Configure basic logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -42,9 +43,37 @@ def explain_moves():
             logging.warning(f"Invalid move_sequence type or content: {move_sequence}")
             return jsonify({'error': 'move_sequence must be a list of strings'}), 400
 
-        move_sequence_str = " ".join(move_sequence)
-        logging.debug(f"FEN: {fen}, Moves: {move_sequence_str}")
+        # Convert UCI move sequence to SAN
+        try:
+            board = chess.Board(fen)
+        except ValueError:
+            logging.error(f"Invalid FEN string received: {fen}")
+            return jsonify({'error': 'Invalid FEN string provided.'}), 400
 
+        san_moves = []
+        # original_move_sequence_for_logging = list(move_sequence) # Keep a copy for logging
+
+        for uci_move_str in move_sequence:
+            try:
+                move = chess.Move.from_uci(uci_move_str)
+                if move in board.legal_moves:
+                    san_move = board.san(move)
+                    san_moves.append(san_move)
+                    board.push(move) # Apply move to update board state for next SAN conversion
+                else:
+                    logging.error(f"Illegal UCI move {uci_move_str} for FEN {fen} and sequence {move_sequence}. Current legal moves: {[m.uci() for m in board.legal_moves]}")
+                    return jsonify({'error': f'Illegal move {uci_move_str} in sequence for FEN {fen}.'}), 400
+            except ValueError: # Handles malformed UCI strings
+                logging.error(f"Invalid UCI move string format: {uci_move_str}")
+                return jsonify({'error': f'Invalid UCI move string format: {uci_move_str}.'}), 400
+        
+        if not san_moves:
+            logging.warning(f"Could not convert any UCI moves to SAN for sequence: {move_sequence} and FEN: {fen}")
+            return jsonify({'error': 'No valid moves found in sequence to convert to SAN.'}), 400
+
+        san_moves_str = " ".join(san_moves)
+        logging.debug(f"FEN: {fen}, Original UCI: {move_sequence}, Converted SAN: {san_moves_str}")
+        
         model_name = os.getenv('OLLAMA_MODEL', 'llama2')
         host = os.getenv('OLLAMA_API_HOST', 'http://localhost:11434')
         
@@ -53,13 +82,13 @@ def explain_moves():
         user_prompt_text = f"""Given the chess position represented by the FEN string:
 {fen}
 
-Explain the following sequence of moves:
-{move_sequence_str}
+Explain the following sequence of moves (in SAN):
+{san_moves_str}
 
 Provide a concise explanation focusing on the plan for the side making these moves.
 """
-        logging.debug(f"System Prompt: {system_prompt_text}")
-        logging.debug(f"User Prompt: {user_prompt_text}")
+        # logging.debug(f"System Prompt: {system_prompt_text}") # Already logged or can be logged if needed
+        logging.debug(f"User Prompt (using SAN): {user_prompt_text}")
         
         try:
             # Initialize client here to use potentially updated host from environment
