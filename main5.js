@@ -430,19 +430,23 @@ function parseBestmoveLine(line) {
                 currentNode.calculateAndSetMoveQuality();
                 treeLayout.needsRedraw = true;
             }
-            if (helpersVisible) highlightedEngineMove = uciToMoveObject(analysisManager.lastBestMove || parts[1]);
+            // Ensure highlightedEngineMove is NOT set here automatically from continuous analysis
+            // if (helpersVisible) highlightedEngineMove = uciToMoveObject(analysisManager.lastBestMove || parts[1]);
         }
         analysisManager.lastScore = null; analysisManager.lastBestMove = null;
     } else if (analysisTypeCompleted === 'best_moves') {
-        if (currentBestMovesResult && currentBestMovesResult.fen === analysisManager.lastBestMovesFen) {
+        if (currentBestMovesResult && currentBestMovesResult.fen === analysisManager.lastBestMovesFen) { // Check if currentBestMovesResult is valid
             if (currentBestMovesResult.moves.length > 0) {
-                currentBestMovesResult.moves.sort((a, b) => a.rank - b.rank);
-                currentBestMoveIndex = 0;
-                highlightedEngineMove = uciToMoveObject(currentBestMovesResult.moves[0].move);
-                updateShowBestButtonText();
-                statusMessage(`Best ${currentBestMoveIndex + 1}/${currentBestMovesResult.moves.length}: ${currentBestMovesResult.moves[0].san} (${currentBestMovesResult.moves[0].score_str})`);
+                currentBestMovesResult.moves.sort((a, b) => a.rank - b.rank); // Already there
+                currentBestMoveIndex = 0; // Prepare for the first click on the button
+                highlightedEngineMove = null; // Ensure no move is highlighted automatically
+                updateShowBestButtonText(); // Update text to "Show Best 1/N" or similar
+                statusMessage(`Top ${currentBestMovesResult.moves.length} moves ready. Click 'Show Best' to display.`);
             } else {
-                statusMessage("Engine found no moves for best_moves."); currentBestMoveIndex = -1; highlightedEngineMove = null; updateShowBestButtonText("No moves found");
+                statusMessage("Engine found no moves for best_moves analysis.");
+                currentBestMoveIndex = -1;
+                highlightedEngineMove = null; // Ensure no move is highlighted
+                updateShowBestButtonText("No moves found");
             }
         }
     } else if (analysisTypeCompleted === 'selected_piece_moves') {
@@ -697,8 +701,11 @@ function commitMove(moveData) {
     playSoundForMove(boardBeforeMoveFen, game.fen(), moveResult);
     startPieceAnimation(moveResult, previousNode);
     lastMoveDisplayed = { from: moveResult.from, to: moveResult.to };
-    highlightedEngineMove = null; currentBestMovesResult = null; selectedPieceEvaluations = null;
-    currentBestMoveIndex = -1; updateShowBestButtonText(); clearSelection();
+    highlightedEngineMove = null; // Cleared on new move
+    currentBestMovesResult = null; // Reset best moves result
+    currentBestMoveIndex = -1; // Reset best move index
+    selectedPieceEvaluations = null;
+    updateShowBestButtonText(); clearSelection();
     liveRawScore = null; targetWhitePercentage = 50.0; // Reset live eval
     requestAnalysis(currentNode.fen, 'continuous');
     if (helpersVisible) requestPlayerPiecesBestMoves(currentNode.fen);
@@ -939,7 +946,10 @@ function handleTreeNodeClick(event) {
             displayedWhitePercentage = targetWhitePercentage; // Snap eval bar
             clearSelection();
             lastMoveDisplayed = currentNode.move ? { from: currentNode.move.from, to: currentNode.move.to } : null;
-            highlightedEngineMove = null; currentBestMovesResult = null; currentBestMoveIndex = -1; updateShowBestButtonText();
+            highlightedEngineMove = null; // Cleared on node navigation
+            currentBestMovesResult = null; // Reset best moves result
+            currentBestMoveIndex = -1; // Reset best move index
+            updateShowBestButtonText();
             requestAnalysis(currentNode.fen, 'continuous');
             if (helpersVisible) requestPlayerPiecesBestMoves(currentNode.fen);
             drawBoard(); drawHighlights(); drawEvalBar(); updatePlot();
@@ -991,15 +1001,35 @@ function updateEvalBarAnimation() {
     else if (displayedWhitePercentage !== targetWhitePercentage) { displayedWhitePercentage = targetWhitePercentage; drawEvalBar(); }
 }
 function updateShowBestButtonText(customText = null) {
-    if (customText) { showBestMoveBtn.textContent = customText; return; }
-    let txt = "Show Best";
-    if (analysisManager.currentAnalysisType === 'best_moves' && analysisManager.isProcessing) txt = "Analyzing...";
-    else if (currentBestMovesResult && currentBestMovesResult.fen === currentNode?.fen) {
-        if (currentBestMovesResult.error) txt = "Analysis Failed";
-        else if (currentBestMovesResult.moves?.length > 0 && currentBestMoveIndex !== -1) txt = `Showing ${currentBestMoveIndex+1}/${currentBestMovesResult.moves.length}`;
-        else if (currentBestMovesResult.moves?.length > 0) txt = "Moves Found";
-        else if (currentBestMovesResult.moves?.length === 0) txt = "No Moves Found";
-    } else if (!engine) txt = "Engine Off"; else if (game.game_over()) txt = "Game Over";
+    if (customText) {
+        showBestMoveBtn.textContent = customText;
+        return;
+    }
+
+    let txt = "Show Best"; // Default
+
+    if (game.game_over()) {
+        txt = "Game Over";
+    } else if (!engine) {
+        txt = "Engine Off";
+    } else if (analysisManager.currentAnalysisType === 'best_moves' && analysisManager.isProcessing) {
+        txt = "Analyzing...";
+    } else if (currentBestMovesResult && currentBestMovesResult.fen === currentNode?.fen) {
+        if (currentBestMovesResult.error) {
+            txt = "Analysis Failed";
+        } else if (currentBestMovesResult.moves?.length > 0) {
+            if (highlightedEngineMove && currentBestMoveIndex !== -1) {
+                txt = `Showing ${currentBestMoveIndex + 1}/${currentBestMovesResult.moves.length}`;
+            } else {
+                // Moves are ready, but not currently being shown (or index is -1 waiting for first click)
+                txt = `Show Best (${currentBestMovesResult.moves.length})`;
+            }
+        } else { // currentBestMovesResult.moves.length === 0
+            txt = "No Moves Found";
+        }
+    }
+    // If none of the above conditions met, txt remains "Show Best"
+
     showBestMoveBtn.textContent = txt;
 }
 
@@ -1146,9 +1176,12 @@ function resetGame(startPosNum) {
         const startFen = game.fen();
         gameRoot = new GameNode(startFen); currentNode = gameRoot;
         selectedSquare = null; legalMovesForSelected = []; lastMoveDisplayed = null;
-        highlightedEngineMove = null; currentBestMovesResult = null; selectedPieceEvaluations = null;
+        highlightedEngineMove = null; // Cleared on game reset
+        currentBestMovesResult = null; // Reset best moves result
+        selectedPieceEvaluations = null;
         currentPlayerPieceBestEvals = { fen: null, evals: new Map() }; // Reset this
-        currentBestMoveIndex = -1; liveRawScore = null; targetWhitePercentage = 50.0;
+        currentBestMoveIndex = -1; // Reset best move index
+        liveRawScore = null; targetWhitePercentage = 50.0;
         displayedWhitePercentage = 50.0; analysisErrorMessage = null; promotionState.pending = false;
         animatingPieceInfo = null; treeLayout.needsRedraw = true; treeNodeElements.clear(); treeLayout.nodePositions.clear();
         if (engine) engine.postMessage('stop');
