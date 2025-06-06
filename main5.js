@@ -48,7 +48,7 @@ const TREE_MOVE_QUALITY_COLORS = {
 const BOARD_BADGE_IMAGE_SIZE = { width: 16, height: 16 };
 
 // Selected Piece Move Evaluation Colors
-const SELECTED_PIECE_MOVE_EVAL_CLAMP = 300;
+const SELECTED_PIECE_MOVE_EVAL_CLAMP = 150; // Adjusted as per subtask
 const SELECTED_PIECE_MOVE_MAX_ALPHA = 0.65;
 
 // --- Game State ---
@@ -211,8 +211,21 @@ function processAnalysisQueue() {
     const request = analysisManager.requestQueue.shift();
     analysisManager.isProcessing = true;
     analysisManager.currentAnalysisType = request.type;
+    analysisManager.activeRequestBaseScoreWhitePov = null; // Reset
     console.log(`Starting analysis: ${request.type} for FEN: ${request.fen.substring(0, 20)}...`);
     engineStatusMessage("");
+
+    if (request.type === 'selected_piece_moves' || request.type === 'player_pieces_best_moves') {
+        if (analysisManager.lastScore) { // Ensure lastScore is available from a previous continuous analysis
+            analysisManager.activeRequestBaseScoreWhitePov = JSON.parse(JSON.stringify(analysisManager.lastScore)); // Deep copy
+            console.log(`Stored base score for delta calculation:`, analysisManager.activeRequestBaseScoreWhitePov);
+        } else {
+            console.warn(`No lastScore available for delta calculation for ${request.type}. Deltas will be relative to zero or not calculable if base is needed.`);
+            // Fallback: if no base score, deltas might be misleading or absolute scores might be used implicitly if base is null.
+            // For now, activeRequestBaseScoreWhitePov will remain null, and delta calculation needs to handle this.
+        }
+    }
+
     engine.postMessage('stop');
     engine.postMessage(`position fen ${request.fen}`);
 
@@ -248,6 +261,12 @@ function parseInfoLine(line) {
     let pv = [];
     let depth = null;
     let multipvRank = null;
+    let score_current_for_delta_calc = null;
+
+    if (analysisManager.currentAnalysisType === 'selected_piece_moves' || analysisManager.currentAnalysisType === 'player_pieces_best_moves') {
+        score_current_for_delta_calc = analysisManager.activeRequestBaseScoreWhitePov;
+        // console.log("Retrieved base score in parseInfoLine:", score_current_for_delta_calc);
+    }
 
     for (let i = 0; i < parts.length; i++) {
         if (parts[i] === 'score') {
@@ -288,7 +307,7 @@ function parseInfoLine(line) {
     if (analysisManager.currentAnalysisType === 'continuous' && parsed_score_obj_white_pov) {
         liveRawScore = parsed_score_obj_white_pov;
         targetWhitePercentage = scoreToWhitePercentage(parsed_score_obj_white_pov, EVAL_CLAMP_LIMIT);
-        analysisManager.lastScore = parsed_score_obj_white_pov;
+        analysisManager.lastScore = parsed_score_obj_white_pov; // Keep this as absolute for the next base score
         if (pv.length > 0) analysisManager.lastBestMove = pv[0];
     } else if (analysisManager.currentAnalysisType === 'best_moves' && parsed_score_obj_white_pov && pv.length > 0 && multipvRank !== null) {
         if (currentBestMovesResult && currentBestMovesResult.fen === analysisManager.lastBestMovesFen) {
@@ -296,21 +315,19 @@ function parseInfoLine(line) {
             const moveSan = uciToSan(moveUci, analysisManager.lastBestMovesFen);
             const scoreStr = formatScore(parsed_score_obj_white_pov, new Chess(analysisManager.lastBestMovesFen).turn());
             let existingMove = currentBestMovesResult.moves.find(m => m.rank === multipvRank);
-            // Ensure 'pv' is the array of moves from the 'info' line.
-            // If pv is not available or empty, set pv_sequence to an empty array.
-            const pv_sequence = (Array.isArray(pv) && pv.length > 0) ? pv : []; 
-            const moveData = { 
-                move: moveUci, 
-                san: moveSan, 
-                score_str: scoreStr, 
-                score_obj: parsed_score_obj_white_pov, 
+            const pv_sequence = (Array.isArray(pv) && pv.length > 0) ? pv : [];
+            const moveData = {
+                move: moveUci,
+                san: moveSan,
+                score_str: scoreStr,
+                score_obj: parsed_score_obj_white_pov, // Store absolute score for best_moves display
                 depth: depth,
-                pv_sequence: pv_sequence // Store the full PV
+                pv_sequence: pv_sequence
             };
-            if (existingMove) { 
-                Object.assign(existingMove, moveData); 
-            } else { 
-                currentBestMovesResult.moves.push({ rank: multipvRank, ...moveData }); 
+            if (existingMove) {
+                Object.assign(existingMove, moveData);
+            } else {
+                currentBestMovesResult.moves.push({ rank: multipvRank, ...moveData });
             }
             currentBestMovesResult.moves.sort((a, b) => a.rank - b.rank);
         }
@@ -321,7 +338,43 @@ function parseInfoLine(line) {
             const fromSq = moveUci.substring(0,2);
             const toSq = moveUci.substring(2,4);
             if (fromSq === selectedPieceEvaluations.pieceSq) {
-                selectedPieceEvaluations.evaluations.set(toSq, { score_obj: parsed_score_obj_white_pov, uci: moveUci });
+                let eval_delta_white_pov = { cp: null, mate: null };
+                const score_after_move_white_pov = parsed_score_obj_white_pov;
+
+                if (score_current_for_delta_calc && score_after_move_white_pov) {
+                    // Both are mate scores
+                    if (score_current_for_delta_calc.mate !== null && score_after_move_white_pov.mate !== null) {
+                        // If current is M5 (good for W), and after_move is M3 (better for W), delta_mate = 3 - 5 = -2 (favors white: fewer moves to mate)
+                        // If current is M-5 (bad for W), and after_move is M-3 (less bad for W), delta_mate = -3 - (-5) = 2 (favors white: fewer moves for black to mate)
+                        // This needs to be consistent: positive delta = good for white.
+                        // Let's define "better mate" as smaller positive number, or larger negative number (closer to 0).
+                        // If after_move.mate > 0 and current_move.mate > 0: (e.g. M3 vs M5) current - after = 5-3=2. Positive is good.
+                        // If after_move.mate < 0 and current_move.mate < 0: (e.g. M-3 vs M-5) current - after = -5 - (-3) = -2. Positive is good. (No, this is wrong)
+                        // Let's use: if positive mate, smaller is better. If negative mate, larger (closer to 0) is better.
+                        // Simpler: convert to a "mate score": positive for white mating, negative for black mating.
+                        // Mate score: (sign) * (1000 - abs(mate_moves)). Higher is better.
+                        const current_mate_score = score_current_for_delta_calc.mate !== 0 ? Math.sign(score_current_for_delta_calc.mate) * (1000 - Math.abs(score_current_for_delta_calc.mate)) : 0;
+                        const after_mate_score = score_after_move_white_pov.mate !== 0 ? Math.sign(score_after_move_white_pov.mate) * (1000 - Math.abs(score_after_move_white_pov.mate)) : 0;
+                        eval_delta_white_pov.cp = after_mate_score - current_mate_score; // Treat as CP delta for simplicity in downstream use
+                    }
+                    // Both are CP scores
+                    else if (score_current_for_delta_calc.cp !== null && score_after_move_white_pov.cp !== null) {
+                        eval_delta_white_pov.cp = score_after_move_white_pov.cp - score_current_for_delta_calc.cp;
+                    }
+                    // Mixed: after_move is mate, current is CP
+                    else if (score_after_move_white_pov.mate !== null && score_current_for_delta_calc.cp !== null) {
+                        eval_delta_white_pov.cp = (score_after_move_white_pov.mate > 0 ? 1 : -1) * 20000 - score_current_for_delta_calc.cp; // Large delta favoring mate
+                    }
+                    // Mixed: current is mate, after_move is CP
+                    else if (score_current_for_delta_calc.mate !== null && score_after_move_white_pov.cp !== null) {
+                         eval_delta_white_pov.cp = score_after_move_white_pov.cp - ((score_current_for_delta_calc.mate > 0 ? 1 : -1) * 20000); // Large delta, sign depends on who was mating
+                    } else { // One or both are null, store absolute as fallback
+                        eval_delta_white_pov = score_after_move_white_pov;
+                    }
+                } else { // If no base score, store absolute score_after_move_white_pov
+                    eval_delta_white_pov = score_after_move_white_pov;
+                }
+                selectedPieceEvaluations.evaluations.set(toSq, { score_obj: eval_delta_white_pov, uci: moveUci });
                 requestRedraw();
             }
         }
@@ -330,10 +383,33 @@ function parseInfoLine(line) {
             const moveUci = pv[0];
             const fromSq = moveUci.substring(0, 2);
             const toSq = moveUci.substring(2, 4);
-            const currentTurn = new Chess(analysisManager.lastPlayerPiecesBestMovesFen).turn();
+            const currentTurn = new Chess(analysisManager.lastPlayerPiecesBestMovesFen).turn(); // Turn for isScoreBetter
+            let eval_delta_white_pov = { cp: null, mate: null };
+            const score_after_move_white_pov = parsed_score_obj_white_pov;
+
+            if (score_current_for_delta_calc && score_after_move_white_pov) {
+                 if (score_current_for_delta_calc.mate !== null && score_after_move_white_pov.mate !== null) {
+                    const current_mate_score = score_current_for_delta_calc.mate !== 0 ? Math.sign(score_current_for_delta_calc.mate) * (1000 - Math.abs(score_current_for_delta_calc.mate)) : 0;
+                    const after_mate_score = score_after_move_white_pov.mate !== 0 ? Math.sign(score_after_move_white_pov.mate) * (1000 - Math.abs(score_after_move_white_pov.mate)) : 0;
+                    eval_delta_white_pov.cp = after_mate_score - current_mate_score;
+                } else if (score_current_for_delta_calc.cp !== null && score_after_move_white_pov.cp !== null) {
+                    eval_delta_white_pov.cp = score_after_move_white_pov.cp - score_current_for_delta_calc.cp;
+                } else if (score_after_move_white_pov.mate !== null && score_current_for_delta_calc.cp !== null) {
+                    eval_delta_white_pov.cp = (score_after_move_white_pov.mate > 0 ? 1 : -1) * 20000 - score_current_for_delta_calc.cp;
+                } else if (score_current_for_delta_calc.mate !== null && score_after_move_white_pov.cp !== null) {
+                    eval_delta_white_pov.cp = score_after_move_white_pov.cp - ((score_current_for_delta_calc.mate > 0 ? 1 : -1) * 20000);
+                }  else {
+                    eval_delta_white_pov = score_after_move_white_pov;
+                }
+            } else {
+                eval_delta_white_pov = score_after_move_white_pov;
+            }
+
             const existingEvalData = currentPlayerPieceBestEvals.evals.get(fromSq);
-            if (!existingEvalData || isScoreBetter(parsed_score_obj_white_pov, existingEvalData.score_obj, currentTurn)) {
-                currentPlayerPieceBestEvals.evals.set(fromSq, { bestToSq: toSq, score_obj: parsed_score_obj_white_pov, uci: moveUci });
+            // isScoreBetter now compares deltas (or absolute if no base was available)
+            // For deltas, a larger positive cp delta is better. Mate deltas are converted to CP-equivalents.
+            if (!existingEvalData || isScoreBetter(eval_delta_white_pov, existingEvalData.score_obj, currentTurn)) {
+                currentPlayerPieceBestEvals.evals.set(fromSq, { bestToSq: toSq, score_obj: eval_delta_white_pov, uci: moveUci });
                 requestRedraw();
             }
         }
@@ -520,23 +596,97 @@ function clearSelection() {
 function attemptMove(fromSq, toSq) {
     const piece = game.get(fromSq);
     if (!piece || !selectedSquare || fromSq !== selectedSquare) { clearSelection(); return; }
-    const moveData = { from: fromSq, to: toSq, promotion: undefined };
-    const isPromotion = (piece.type === 'p') && ((piece.color === 'w' && toSq[1] === '8') || (piece.color === 'b' && toSq[1] === '1'));
-    if (isPromotion) {
-        showPromotionPopup(fromSq, toSq, piece.color, (choice) => {
-            if (choice) { moveData.promotion = choice; commitMove(moveData); }
-            else { statusMessage("Promotion cancelled."); clearSelection(); }
-        });
+
+    console.log("Attempting move (original target):", fromSq, toSq, "Piece:", piece.type);
+    console.log("FEN before move:", game.fen());
+    console.log("White castling rights:", game.getCastlingRights('w'));
+    console.log("Black castling rights:", game.getCastlingRights('b'));
+    const isKingMove = piece.type === 'k';
+    let isPotentialTwoSquareCastle = false;
+    if (isKingMove) {
+        isPotentialTwoSquareCastle = Math.abs(fromSq.charCodeAt(0) - toSq.charCodeAt(0)) === 2;
+    }
+    console.log("Castling check: King moving two squares?", isPotentialTwoSquareCastle);
+
+    let moveData = { from: fromSq, to: toSq, promotion: undefined };
+    let legalMove = legalMovesForSelected.find(m => m.to === toSq && m.from === fromSq); // Standard move check
+
+    if (!legalMove && isKingMove) { // If standard move not found, and it's a king, check for castling by clicking/dropping on rook
+        const targetPiece = game.get(toSq);
+        if (targetPiece && targetPiece.type === 'r' && targetPiece.color === piece.color) {
+            // King targeting a friendly rook.
+            console.log("King targeted friendly rook at", toSq);
+            const kingStartFile = fromSq.charCodeAt(0);
+            const rookFile = toSq.charCodeAt(0);
+            let kingDestSq = null;
+
+            // Determine potential king destination for castling
+            // This logic assumes standard castling rules where king moves two squares.
+            // Chess960 castling moves in chess.js are represented by king moving to its final square.
+            if (rookFile > kingStartFile) { // Potential kingside (rook is to the right of the king)
+                kingDestSq = String.fromCharCode(kingStartFile + 2) + fromSq[1];
+                console.log("Potential kingside castle, king destination:", kingDestSq);
+            } else { // Potential queenside (rook is to the left of the king)
+                kingDestSq = String.fromCharCode(kingStartFile - 2) + fromSq[1];
+                console.log("Potential queenside castle, king destination:", kingDestSq);
+            }
+
+            const castlingMove = legalMovesForSelected.find(m =>
+                m.from === fromSq &&
+                m.to === kingDestSq &&
+                (m.flags.includes('k') || m.flags.includes('q'))
+            );
+
+            if (castlingMove) {
+                console.log("Found matching castling move in legalMovesForSelected:", castlingMove);
+                legalMove = castlingMove; // Found the castling move
+                moveData.to = kingDestSq; // Update moveData to king's actual destination
+                console.log("Updated moveData.to for castling:", moveData.to);
+            } else {
+                console.log("No matching castling move found for king dest", kingDestSq, "from", fromSq);
+            }
+        }
+    }
+
+    if (legalMove) {
+        // Log the final determined move before promotion check
+        console.log("Final determined move for processing:", legalMove, "Target square for commit:", legalMove.to);
+        // Check for promotion based on the *actual* 'to' square of the legalMove
+        const isPromotion = (legalMove.piece === 'p') &&
+                            ((game.turn() === 'w' && legalMove.to[1] === '8') ||
+                             (game.turn() === 'b' && legalMove.to[1] === '1'));
+
+        if (isPromotion) {
+            console.log("Promotion detected for move to", legalMove.to);
+            showPromotionPopup(legalMove.from, legalMove.to, game.turn(), (choice) => {
+                if (choice) {
+                    console.log("Promotion choice:", choice);
+                    commitMove({ from: legalMove.from, to: legalMove.to, promotion: choice });
+                } else {
+                    console.log("Promotion cancelled");
+                    statusMessage("Promotion cancelled."); clearSelection();
+                }
+            });
+        } else {
+            console.log("No promotion. Committing move:", { from: legalMove.from, to: legalMove.to, promotion: legalMove.promotion });
+            // Use from/to from legalMove for commitMove
+            commitMove({ from: legalMove.from, to: legalMove.to, promotion: legalMove.promotion });
+        }
     } else {
-        const legalMove = legalMovesForSelected.find(m => m.to === toSq);
-        if (legalMove) { commitMove(moveData); }
-        else { statusMessage("Illegal move."); playSound("illegal_move"); clearSelection(); }
+        console.log("No legal move found for", fromSq, "to", toSq, "(original or derived castle target)");
+        statusMessage("Illegal move."); playSound("illegal_move"); clearSelection();
     }
 }
 
 function commitMove(moveData) {
+    console.log("Committing move with data:", moveData);
     const moveResult = game.move(moveData);
-    if (moveResult === null) { statusMessage("Illegal move."); playSound("illegal_move"); clearSelection(); return; }
+    if (moveResult === null) {
+        console.log("Move result: null (illegal move). Castling attempt might have failed.");
+        statusMessage("Illegal move."); playSound("illegal_move"); clearSelection(); return;
+    }
+    console.log("Move result:", moveResult);
+    console.log("FEN after move attempt:", game.fen());
     statusMessage(`Played ${moveResult.san}`);
     const parentNode = currentNode; const boardBeforeMoveFen = parentNode.fen;
     let existingChild = parentNode.children.find(c => c.move && c.move.from === moveResult.from && c.move.to === moveResult.to && c.move.promotion === moveResult.promotion);
@@ -894,35 +1044,92 @@ function squareToPixelCoords(sq, sz, r) { const f=sq.charCodeAt(0)-'a'.charCodeA
 function uciToMoveObject(uci) { if(!uci||uci.length<4)return null; return {from:uci.substring(0,2),to:uci.substring(2,4),promotion:uci.length===5?uci.substring(4):undefined}; }
 function uciToSan(uci, fen) { try{const b=new Chess(fen);b.chess960=true;const m=b.move(uci,{sloppy:true});return m?m.san:uci;}catch(e){return uci;} }
 
-function isScoreBetter(newScore_wp, oldScore_wp, playerTurn) { // Expects White's POV scores
-    const getComparable = (score_obj_wp, turn_for_pov) => {
-        if (score_obj_wp.mate !== null) {
-            let mateVal = score_obj_wp.mate; // White's POV mate
-            if (turn_for_pov === 'b') mateVal = -mateVal; // Convert to playerTurn's POV mate
-            return mateVal > 0 ? (100000 - mateVal) : (-100000 - mateVal); // Higher is better
-        }
+function isScoreBetter(newScore_wp, oldScore_wp, playerTurn) {
+    // newScore_wp and oldScore_wp can be absolute scores (White's POV) or delta scores (White's POV).
+    // The delta calculation in parseInfoLine now stores mate-vs-mate or mate-vs-cp differences in the .cp field of the delta.
+    // Therefore, we primarily compare .cp values here.
+    // playerTurn is still relevant if we need to consider the perspective for absolute scores,
+    // but for deltas (which are already White's POV), a larger positive CP delta is always better for White.
+
+    const getComparable = (score_obj_wp, turn_for_pov_if_absolute) => {
+        // If score_obj_wp is a delta, its .cp already reflects the change.
+        // If it's an absolute score, we convert to player's POV.
+        // The delta calculation already put mate differences into .cp field with large magnitudes.
+
         if (score_obj_wp.cp !== null) {
-            return turn_for_pov === 'w' ? score_obj_wp.cp : -score_obj_wp.cp;
+            // If this is a delta, it's already White's POV.
+            // If this is an absolute score, and playerTurn is 'b', we'd flip it.
+            // However, since deltas are now used for selected_piece and player_pieces,
+            // and they are calculated from White's POV, direct comparison of .cp is fine.
+            // The `turn_for_pov_if_absolute` is mostly for clarity if we ever mix raw absolute scores here.
+            // For player_pieces_best_moves, the eval_delta_white_pov is passed, which is White's POV.
+            // A higher CP value (whether absolute for White or a positive delta for White) is better for White.
+            return score_obj_wp.cp;
         }
-        return turn_for_pov === 'w' ? -200000 : 200000; // Should not happen
+        // Fallback for rare cases or if only mate is present (though delta logic tries to put into .cp)
+        if (score_obj_wp.mate !== null) {
+            // This part is less likely to be hit if delta logic correctly populates .cp for mate differences
+            let mateVal = score_obj_wp.mate; // White's POV mate
+            // If it's a delta with mate (e.g. eval_delta_white_pov.mate), it's already from White's POV perspective change.
+            // If it's an absolute score, then playerTurn matters.
+            // Let's assume for now that if .mate is here, it's an absolute score that needs POV conversion.
+            if (turn_for_pov_if_absolute === 'b') mateVal = -mateVal;
+            return mateVal > 0 ? (100000 - mateVal) : (-100000 - mateVal);
+        }
+        // If turn_for_pov_if_absolute is 'w', worse score is -200000. If 'b', better score for white is -200000 (meaning +200000 for black).
+        // This needs to be consistent: higher is better for the player whose turn it is, *or* for White if comparing White POV deltas.
+        // Since deltas are White POV, higher is better.
+        return -200000; // Default for non-comparable or error
     };
-    return getComparable(newScore_wp, playerTurn) > getComparable(oldScore_wp, playerTurn);
+
+    // When comparing deltas (which are White's POV), playerTurn isn't strictly needed for getComparable,
+    // as we just want to see if new_delta.cp > old_delta.cp.
+    // If these are absolute scores, playerTurn is used by getComparable to flip to current player's POV.
+    // The current implementation of delta calculation stores results in .cp field for comparison.
+    const newComparable = getComparable(newScore_wp, playerTurn);
+    const oldComparable = getComparable(oldScore_wp, playerTurn);
+
+    return newComparable > oldComparable;
 }
 
-function getMoveEvalColor(score_obj_white_pov, turn_to_move) { // Expects White's POV score
-    if (!score_obj_white_pov) return `rgba(128, 128, 128, ${SELECTED_PIECE_MOVE_MAX_ALPHA * 0.3})`;
+function getMoveEvalColor(score_obj_white_pov, turn_to_move) { // Expects White's POV DELTA score
     let eval_points;
-    if (score_obj_white_pov.mate !== null) {
-        eval_points = score_obj_white_pov.mate > 0 ? SELECTED_PIECE_MOVE_EVAL_CLAMP : -SELECTED_PIECE_MOVE_EVAL_CLAMP;
-    } else if (score_obj_white_pov.cp !== null) {
-        eval_points = score_obj_white_pov.cp;
-    } else { return `rgba(128, 128, 128, ${SELECTED_PIECE_MOVE_MAX_ALPHA * 0.3})`; }
 
-    if (turn_to_move === 'b') eval_points = -eval_points; // Convert to POV of turn_to_move
+    if (score_obj_white_pov && score_obj_white_pov.cp !== null) {
+        eval_points = score_obj_white_pov.cp;
+    } else if (score_obj_white_pov && score_obj_white_pov.mate !== null) {
+        // This is a fallback if a mate delta wasn't converted to CP equivalent in parseInfoLine.
+        // A positive mate delta means "better for White", negative means "worse for White".
+        console.warn("getMoveEvalColor received score_obj with mate property. Expected .cp for deltas.", score_obj_white_pov);
+        eval_points = score_obj_white_pov.mate > 0 ? SELECTED_PIECE_MOVE_EVAL_CLAMP : -SELECTED_PIECE_MOVE_EVAL_CLAMP;
+    } else {
+        // No valid score information or effectively a zero delta
+        return `rgba(128, 128, 128, ${SELECTED_PIECE_MOVE_MAX_ALPHA * 0.1})`; // Reduced alpha for neutral/zero delta
+    }
+
+    // Convert White's POV delta to the current player's POV delta for coloring
+    // If it's White's turn, a positive delta is good (green).
+    // If it's Black's turn, a positive White POV delta is bad for Black (red).
+    // So, if Black's turn, we flip the sign of eval_points.
+    if (turn_to_move === 'b') {
+        eval_points = -eval_points;
+    }
+
     const norm = Math.max(-1, Math.min(1, eval_points / SELECTED_PIECE_MOVE_EVAL_CLAMP));
     let r, g, b;
-    if (norm <= 0) { const t = 1 + norm; r = 255; g = Math.round(255 * t); b = 0; }
-    else { const t = norm; r = Math.round(255 * (1-t)); g = 255; b = 0; }
+
+    // Colors: Green for positive (good for current player), Red for negative (bad for current player)
+    if (norm <= 0) { // Negative or zero (bad or neutral for current player) -> Red or transitioning to Yellow/Neutral
+        const t = 1 + norm; // t goes from 0 (max negative) to 1 (zero)
+        r = 255;
+        g = Math.round(255 * t); // From 0 (red) to 255 (yellow)
+        b = 0;
+    } else { // Positive (good for current player) -> Green or transitioning from Yellow/Neutral
+        const t = norm; // t goes from 0 (zero) to 1 (max positive)
+        r = Math.round(255 * (1-t)); // From 255 (yellow) to 0 (green)
+        g = 255;
+        b = 0;
+    }
     const alpha = SELECTED_PIECE_MOVE_MAX_ALPHA * Math.abs(norm);
     return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
